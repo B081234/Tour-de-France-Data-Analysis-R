@@ -1,0 +1,303 @@
+---
+title: "Group F TDF Project Report"
+author: "Riya Purvesh Shah<br>Pavani Balusu<br>Prabhu Senthilkumar<br>Arpit Rajesh Jadhav"        
+output: 
+   html_document:
+     code_folding: hide
+fig_caption: TRUE
+---
+
+<style>.figure.caption{text-align: left !important;}</style>
+
+# TDF Report {.tabset}
+:::{.panel-tabset}
+
+## Introduction
+The Tour de France is a very recognisable and challenging cycling event in the world and it has long-distance routes, uneven terrains and severe multi-stage format. Since the inaugural issue in 1903, the race has been testing the riders with flat sprints, mountain climbs of steepness, time trial, and team tactics. Its development through more than a hundred years has not only been a change in sports performance and training but also a transformation of the race structure, competition and international involvement.
+
+This report discusses the four visual analyses of how the structure, difficulty, and nature of the Tour de France have changed over the years. We discuss changes in nationality dominance among victors, alterations in distribution of stage types within years, correlation relationships between important difficulty measures on a heatmap and distribution of stage victories by team. These plots combined make it a definite, factual, and analytical insight into how the race has evolved through the years and come to be a more strategic and globally competitive race and not merely a regionally dominated endurance race.
+
+Our main problem statement is How have the structure, difficulty, and characteristics of the Tour de France evolved over time?
+We have tried to explain this question in various factors with the help of 4 subproblems which were answered by the graphs. 
+The subproblems are:
+
+ 1. How has nationality dominance among Tour de France winners changed over time?
+
+ 2. How the Stage Types is distributed over the Years?
+
+ 3. How have race difficulty and characteristics evolved over time?
+
+ 4. How are team performance outcomes distributed across history?
+ 
+I, Riya Purvesh Shah, had primary responsibility in creating the stacked bar chart as well as its insights and making of report.
+
+I, Prabhu Senthilkumar, had primary responsibility in making of Stacked area plot and its insights and reviewed and refined the report .
+
+I, Pavani Balusu, had primary responsibility in making of Correlation heatmap and its insights and wrote introduction and conclusion.
+
+I, Arpit Rajesh Jadhav, had primary responsibility in making of Histogram and its insights. 
+ 
+## Data Adjustments
+
+In this given dataset we are provided with 3 tables and each member are working on different tables so depending on that data cleaning is done as per the column necessities.
+
+These libraries support data manipulation (dplyr, tidyverse), visualization (ggplot2, plotly, crosstalk), and data import (readr). They form the backbone of our analysis and interactive plotting workflow.
+```{r, message = FALSE, warning = FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(crosstalk)
+library(tidyverse)
+library(readr)
+```
+
+We begin by installing and loading the tidytuesdayR and gh packages to access the datasets from the TidyTuesday project. The tt_load() function retrieves the dataset for April 7, 2020, which includes Tour de France data. 
+```{r, message = FALSE, warning = FALSE}
+
+install.packages("tidytuesdayR", repos = "https://cloud.r-project.org") 
+install.packages("gh")
+library(gh)
+tuesdata <- tidytuesdayR::tt_load('2020-04-07')
+```
+
+Reads the 3 dataset tables containing winner data and stage results.
+```{r} 
+tdf_stages<- tuesdata$tdf_stages
+stage_data<- tuesdata$stage_data
+tdf_winners<- tuesdata$tdf_winners
+```
+
+
+We isolate key indicators of race difficulty — edition, distance, stage wins, and stages led — and remove rows with missing values to ensure accurate correlation analysis.
+```{r}
+# Select the variables that reflect overall race difficulty and structure
+tdf_clean <- tdf_winners %>%
+  select(edition, distance, stage_wins, stages_led)
+
+# Remove rows with missing values
+tdf_clean <- tdf_clean %>%
+  filter(
+    !is.na(edition),
+    !is.na(distance),
+    !is.na(stage_wins),
+    !is.na(stages_led)
+  )
+```
+
+Correlation matrix is created for difficulty indicators and then it was converted into the long table format for ggplot. 
+```{r}
+# Create a correlation matrix for the selected difficulty indicators
+corMatrix <- cor(tdf_clean, use = "complete.obs")
+
+# Convert the matrix to a long format for ggplot
+corLong <- as.data.frame(as.table(corMatrix))
+names(corLong) <- c("Var1", "Var2", "Correlation")
+```
+
+This is for categorizing the stage types for neat Stacked area plot
+```{r}
+# Categorize the stage types 
+tdf_stages <- tdf_stages %>%
+  mutate(year = year(as.Date(Date, format = "%d-%m-%Y"))) 
+
+stages_clean <- tdf_stages %>%
+  mutate(stage_type = case_when(
+    str_detect(Type, regex("flat|plain|cobble|transition", ignore_case = TRUE)) ~ "Flat",
+    str_detect(Type, regex("hilly|medium|intermediate", ignore_case = TRUE)) ~ "Hilly",
+    str_detect(Type, regex("mountain stage|high mountain|mountain$", ignore_case = TRUE)) ~ "Mountain",
+    str_detect(Type, regex("individual time trial|itt|mountain time trial", ignore_case = TRUE)) ~ "Time Trial",
+    str_detect(Type, regex("team time trial|ttt", ignore_case = TRUE)) ~ "Team Time Trial",
+    TRUE ~ "Other"
+  )) %>%
+  filter(stage_type != "Other")
+
+count_stage_by_year <- stages_clean %>%
+  group_by(year, stage_type) %>%
+  summarise(count = n(), .groups = "drop")
+```
+
+This is for the histogram, This block standardizes the team column by trimming whitespace, converting empty strings to NA, and replacing missing values with "Unknown". We then exclude "Unknown" to focus on valid team entries.
+```{r}
+# CLEANING TEAM COLUMN
+stage_clean <- stage_data %>%
+  mutate(
+    team = str_trim(team),
+    team = na_if(team, ""),
+    team = ifelse(is.na(team), "Unknown", team)
+  ) %>%
+  filter(team != "Unknown")
+```
+
+For histogram, We tally the number of stage wins for each team using count(), creating a summary table for further analysis or visualization.
+```{r}
+# COUNT STAGE WINS PER TEAM
+teamsWin <- stage_clean %>%
+  count(team, name = "wins")
+```
+
+To prevent skewed histograms, we identify and remove extreme outliers in team wins using the Interquartile Range (IQR) method. This ensures a more interpretable and balanced visualization.
+```{r}
+# REMOVE EXTREME OUTLIERS USING IQR (Fixes broken histogram)
+Q1 <- quantile(teamsWin$wins, 0.25)
+Q3 <- quantile(teamsWin$wins, 0.75)
+IQR_value <- IQR(teamsWin$wins)
+
+upper_limit <- Q3 + 1.5 * IQR_value
+
+teamsWinFiltered <- teamsWin %>%
+  filter(wins <= upper_limit)
+```
+
+## Analysis
+
+### Subproblem 1: How has nationality dominance among Tour de France winners changed over time? 
+```{r, fig.cap="fig 1.1:  Nationality Dominance in Tour de France"}
+tdf_winner_counts <- tdf_winners |>
+  filter(!is.na(nationality), !is.na(start_date)) |>
+  mutate(year = lubridate::year(start_date),        # extract year from start_date
+         decade = floor(year / 10) * 10) |>         # group into decades like 1920, 1930...
+  group_by(decade, nationality) |>
+  summarise(wins = n(), .groups = "drop") |>
+  group_by(nationality) |>
+  filter(n() > 3) |>                                # keep only nationalities with enough data
+  ungroup()
+ 
+shared_counts <- SharedData$new(tdf_winner_counts)
+
+# Plot
+stacked_bar <- ggplot(shared_counts, aes(x = factor(decade), y = wins, fill = nationality)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Nationality Dominance in Tour de France (Wins per Decade)",
+       x = "Decade (Year)",
+       y = "Number of Wins") +
+  theme_minimal()+
+  theme(
+   plot.title = element_text(face = "bold", size = 12))
+
+highlight(
+  ggplotly(stacked_bar, tooltip = c("nationality", "decade", "wins")),
+  on = "plotly_click",
+  off = "plotly_doubleclick",
+  selectize = FALSE,
+  dynamic = FALSE
+)
+
+```
+
+Note : This chart only includes the countries with more than 3 wins across decades, to maintain clarity and focus on dominant trends. 
+
+**Interpretation**: The chart is used to show how the dominance of nationality of winners in the tour de France has changed over time.
+
+The region of origin of the race was mostly dominated by France and Belgium in the early decades.
+
+Later decades are more international dominated, and this indicates the shift of the Tour into global competitive race. 
+
+### Subproblem 2: How the Stage Types is distributed over the Years?
+```{r, fig.cap="fig 1.2: Stage type distribution over years"}
+ggplot(count_stage_by_year, aes(x = year, y = count, fill = stage_type)) +
+  geom_area(alpha = 0.85, colour = "black") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Tour de France Stage Types (1903–2019)",
+    x = "Year",
+    y = "Number of Stages",
+    fill = "Stage Type"
+  ) +
+  theme_minimal()
+
+```
+
+**Interpretation**:
+1. Flat stages dominate historically but decline over time.In earlier 19s, flat stages make up the largest portion of the race. Their share gradually decreases after 1950 as the race evolves, suggesting a shift away from long, sprint-friendly stages.
+
+2. Hilly/medium-mountain stages increase significantly in recent decades.The chart typically shows a noticeable rise in the number of mountain stages mainly from the 1950s onward. This reflects the Tour’s growing emphasis on climbing ability and more dramatic, high-altitude battles.
+
+3. Mountain Stages surge dramatically after 1940s.The chart shows the mountain stagess are very few in earlier tours and now became a core feature of the race in the modern years
+
+4. Individual/team Time trial (TT) stages fluctuate rather than follow a clear trend.Time trials appear in varying amounts, it rises sharply from 1960-1990 and a strong decline after 2010. They appear inconsistently over the decades, recent tours include them occasionally.
+
+### Subproblem 3: How have race difficulty and characteristics evolved over time?
+```{r, fig.cap="fig 1.3: Race difficulty and characteristics evolution"}
+# Plot a correlation heatmap
+ggplot(corLong, aes(Var1, Var2, fill = Correlation)) +
+  geom_tile(color = "black") +  # tile boxes with borders
+
+  # Add correlation values inside each tile
+  geom_text(
+    aes(label = sprintf("%.2f", Correlation)),
+    size = 5,
+    color = "black"
+  ) +
+
+  #Color palette
+  scale_fill_gradient2(
+    low = "#91bfdb",   # light blue for negative correlation
+    mid = "white",     # neutral
+    high = "#fc8d59",  # soft red for positive correlation
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Correlation"
+  ) +
+
+  # Title and labels
+  labs(
+    title = "Correlation Heatmap of Tour de France Difficulty Indicators",
+    x = "",
+    y = ""
+  ) +
+
+  # Theme 
+  theme_minimal(base_size = 15) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    plot.title = element_text(size = 18, face = "bold")
+  )
+
+```
+
+**Interpretation**: The negative correlation between edition and distance (-0.67) is quite high proving that the Tour de France is becoming shorter.
+
+Between distance and performance measures Weak links are indicative of how race difficulty is currently more of a stage design consideration, rather than of overall length.
+
+In general, the race has become not only more endurance-based but also more of an exercise of stamina and tactics that has a balanced mix of diversity on the stage, which is the problem statement.
+
+### Subproblem 4: How are team performance outcomes distributed across history?
+
+```{r, fig.cap="fig 1.4: Distribution of stage wins per team"}
+#  Plot a histogram
+ggplot(teamsWinFiltered, aes(x = wins)) +
+  geom_histogram(
+    bins = 20,
+    aes(fill = after_stat(count)),
+    color = "white",
+    alpha = 0.85
+  ) +
+  scale_fill_gradient(low = "#69b3a2", high = "#404080") +
+  labs(
+    title = "Distribution of Stage Wins per Team",
+    x = "Number of Stage Wins",
+    y = "Number of Teams",
+    fill = "Team Count"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    legend.position = "right"
+  )
+```
+
+**Interpretation**: Stage victories lie with some large dominating teams with the majority of the teams making comparably small claims on stage win.
+
+This underscores the increasing significance of team structure, team resources, and team strategic coordination in the Tour de France.
+
+In general, the distribution demonstrates that race has developed through the years between personal performances and the success of teams.
+
+## Conclusion
+
+In this report, four selective visual analyses are used to examine how structure, difficulty, and nature of the Tour de France changed through the years. These findings indicate that there is a notable change in the there once-early race that was largely controlled by a few European countries into a more global competition, as a result of the expansion of the professional cycling to the entire world.
+
+Alterations in the makeup of the stage further point out this change. Flat stages that prevailed during the early years have gradually decreased in percentage and mountain and hilly stages became more pronounced. As well as an overall shortening of the total race distance, that shows a shift to a less endurance-focused race structure and towards one where climbing skill and tactical riding and versatility are valued.
+
+Lastly, the number of stage wins per team indicates that team power, resources and coordination are, in fact, more significant to success in the modern Tour de France than the individual performance itself. In general, the Tour is now more of a strategic and balanced race, which is challenging and at the same time has evolved to accommodate modern competitive and global requirements.
